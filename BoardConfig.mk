@@ -359,7 +359,7 @@ TW_HAS_EDL_MODE := false
 # TW_SUPPORT_INPUT_AIDL_HAPTICS_FIX_OFF := true
 TW_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
 TW_BACKUP_EXCLUSIONS := /data/fonts
-TW_DEVICE_VERSION := Xiaomi_17_Ultra
+TW_DEVICE_VERSION := -Built_by_kevte89
 TW_DEFAULT_TIMEZONE := "Asia/Shanghai"
 
 # -----------------------------------------------------------------------------
