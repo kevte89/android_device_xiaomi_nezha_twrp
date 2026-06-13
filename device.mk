@@ -175,3 +175,7 @@ PRODUCT_COPY_FILES += \
 # -----------------------------------------------------------------------------
 PRODUCT_COPY_FILES += \
     $(call find-copy-subdir-files,*,$(DEVICE_PATH)/prebuilt/odm,recovery/root/vendor/odm)
+
+# Recovery build needs this file for bootable/recovery/prebuilt ramdisk setup.
+PRODUCT_COPY_FILES += \
+    device/xiaomi/nezha/prebuilt/system/etc/task_profiles.json:$(TARGET_COPY_OUT_SYSTEM)/etc/task_profiles.json
