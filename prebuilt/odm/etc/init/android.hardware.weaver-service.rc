@@ -3,6 +3,7 @@ service goodix_weaver_hal_service /sbin/android.hardware.weaver-service-goodix-r
     user root
     group root system drmrpc
     capabilities WAKE_ALARM
+    interface aidl android.hardware.weaver.IWeaver/default
     setenv LD_LIBRARY_PATH /sbin/lib64:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/odm/lib64
     setenv TMPDIR /tmp/nezha-goodix
     setenv GOODIX_LOG_PATH /tmp/nezha-goodix/logs
