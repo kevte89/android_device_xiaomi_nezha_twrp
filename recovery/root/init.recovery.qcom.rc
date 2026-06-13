@@ -178,3 +178,7 @@ service nezha-goodix-cleanup /system/bin/nezha-goodix-cleanup.sh
 
 on property:sys.powerctl=*
     start nezha-goodix-cleanup
+
+# Start Goodix eSE/Weaver chain before FBE user decrypt.
+on property:twrp.modules.loaded=true
+    start nezha-goodix-gate
