@@ -2,6 +2,8 @@ service secure_element_hal_service /sbin/android.hardware.secure_element-service
     class early_hal
     user root
     group root system drmrpc
+    interface aidl vendor.goodix.hardware.secure_element_aidl.IGdxEse/default
+    interface aidl android.hardware.secure_element.ISecureElement/eSE2
     setenv LD_LIBRARY_PATH /sbin/lib64:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/odm/lib64
     setenv TMPDIR /tmp/nezha-goodix
     setenv GOODIX_LOG_PATH /tmp/nezha-goodix/logs
