@@ -42,7 +42,7 @@ detect_route() {
     route=fallback
     case "$model:$hwver" in
         *25128PNA1C*|*:5.9.7*) route=leica_597 ;;
-        *2512BPNDAC*|*:5.9.0*) route=normal_590 ;;
+        *2512BPNDAC*|*:5.9.0*|*:5.19.0*) route=normal_590 ;;
     esac
 
     setprop twrp.nezha.model "$model"
@@ -146,6 +146,28 @@ if ! wait_stable_running vendor.minkdaemon "$mink_stable" "$mink_limit"; then
 fi
 
 sleep "$settle_before_goodix"
+
+log_msg "starting minkipcbinder-service"
+start minkipcbinder-service
+sleep 2
+
+log_msg "starting ssgqmigd64 direct"
+if [ -x /vendor/bin/ssgqmigd64 ]; then
+    killall ssgqmigd64 2>/dev/null || true
+    /vendor/bin/ssgqmigd64 >/tmp/ssgqmigd64.log 2>&1 &
+    sleep 3
+else
+    log_msg "ssgqmigd64 binary missing"
+fi
+
+log_msg "starting ssgqmigd direct fallback"
+if [ -x /vendor/bin/ssgqmigd ]; then
+    killall ssgqmigd 2>/dev/null || true
+    /vendor/bin/ssgqmigd >/tmp/ssgqmigd.log 2>&1 &
+    sleep 2
+else
+    log_msg "ssgqmigd binary missing"
+fi
 
 start secure_element_hal_service
 if ! wait_stable_running secure_element_hal_service "$se_stable" "$se_limit"; then
