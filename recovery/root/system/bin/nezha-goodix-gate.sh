@@ -55,8 +55,12 @@ detect_route() {
 reset_goodix_services() {
     stop goodix_weaver_hal_service
     stop secure_element_hal_service
+    stop vendor.secure_element
+    stop vendor.qwesd
     killall android.hardware.weaver-service-goodix-recovery 2>/dev/null || true
     killall android.hardware.secure_element-service-goodix-recovery 2>/dev/null || true
+    killall android.hardware.secure_element-service.qti 2>/dev/null || true
+    killall qwesd 2>/dev/null || true
 }
 
 prepare_tmp_state() {
@@ -90,6 +94,10 @@ case "$(getprop twrp.nezha.crypto_route)" in
         qsee_limit=25
         mink_stable=3
         mink_limit=25
+        qwes_stable=3
+        qwes_limit=25
+        qti_se_stable=4
+        qti_se_limit=35
         se_stable=4
         se_limit=35
         weaver_stable=5
@@ -103,6 +111,10 @@ case "$(getprop twrp.nezha.crypto_route)" in
         qsee_limit=15
         mink_stable=2
         mink_limit=15
+        qwes_stable=2
+        qwes_limit=15
+        qti_se_stable=2
+        qti_se_limit=20
         se_stable=2
         se_limit=20
         weaver_stable=3
@@ -116,6 +128,10 @@ case "$(getprop twrp.nezha.crypto_route)" in
         qsee_limit=25
         mink_stable=3
         mink_limit=25
+        qwes_stable=3
+        qwes_limit=25
+        qti_se_stable=3
+        qti_se_limit=30
         se_stable=3
         se_limit=30
         weaver_stable=4
@@ -128,6 +144,7 @@ esac
 
 stop vendor.qseecomd
 stop vendor.minkdaemon
+stop vendor.qwesd
 sleep 1
 start vendor.qseecomd
 if ! wait_stable_running vendor.qseecomd "$qsee_stable" "$qsee_limit"; then
@@ -142,6 +159,23 @@ start vendor.minkdaemon
 if ! wait_stable_running vendor.minkdaemon "$mink_stable" "$mink_limit"; then
     setprop twrp.nezha.goodix_gate_error vendor_minkdaemon_not_stable
     log_msg "vendor.minkdaemon did not stay running"
+    exit 0
+fi
+
+start vendor.qwesd
+if ! wait_stable_running vendor.qwesd "$qwes_stable" "$qwes_limit"; then
+    setprop twrp.nezha.goodix_gate_error vendor_qwesd_not_stable
+    log_msg "vendor.qwesd did not stay running"
+    exit 0
+fi
+
+# The Goodix eSE2 service sits behind QTI secure_element plumbing. Make the
+# dependency explicit so the Goodix HAL does not win a Binder race while the
+# underlying eSE transport is still settling.
+start vendor.secure_element
+if ! wait_stable_running vendor.secure_element "$qti_se_stable" "$qti_se_limit"; then
+    setprop twrp.nezha.goodix_gate_error vendor_secure_element_not_stable
+    log_msg "vendor.secure_element did not stay running"
     exit 0
 fi
 
@@ -183,7 +217,7 @@ while [ "$attempt" -le "$weaver_attempts" ]; do
     start goodix_weaver_hal_service
     if wait_stable_running goodix_weaver_hal_service "$weaver_stable" "$weaver_limit"; then
         setprop twrp.nezha.weaver_ready 1
-        log_msg "Goodix eSE and Weaver stable route=$(getprop twrp.nezha.crypto_route)"
+        log_msg "Goodix eSE2 transport and Weaver service stable route=$(getprop twrp.nezha.crypto_route)"
         exit 0
     fi
     stop goodix_weaver_hal_service

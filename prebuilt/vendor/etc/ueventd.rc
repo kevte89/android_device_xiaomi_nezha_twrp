@@ -1,1 +1,2 @@
 /dev/0:0:0:49476          0600   system     system
+/dev/smcinvoke            0660   system     drmrpc
