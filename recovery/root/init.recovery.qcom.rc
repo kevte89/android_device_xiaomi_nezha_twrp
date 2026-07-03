@@ -177,6 +177,18 @@ service nezha-goodix-gate /system/bin/nezha-goodix-gate.sh
     group root shell
     seclabel u:r:recovery:s0
 
+# Recovery-local qwesd avoids relying on the stock vendor init service, which
+# can be started early from a mounted vendor partition before recovery fixes are
+# visible.
+service recovery.qwesd /vendor/bin/qwesd
+    disabled
+    oneshot
+    socket qwesd stream 0660 system system
+    user root
+    group root system drmrpc
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /system/lib64:/sbin/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64
+
 # Stock vendor/etc/init/hw/init.qcom.rc starts ssgqmigd through init so the
 # daemon receives ANDROID_SOCKET_ssgqmig. Starting the binary directly breaks
 # sec_channel setup.

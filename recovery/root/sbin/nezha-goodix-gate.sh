@@ -38,32 +38,32 @@ log_msg() {
 }
 
 dump_goodix_state() {
-    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.qwesd=$(getprop init.svc.vendor.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) ssgqmigd=$(getprop init.svc.ssgqmigd) minkipcbinder-service=$(getprop init.svc.minkipcbinder-service) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) twrp.nezha.weaver_ready=$(getprop twrp.nezha.weaver_ready) twrp.nezha.goodix_gate_error=$(getprop twrp.nezha.goodix_gate_error) twrp.user.0.decrypt=$(getprop twrp.user.0.decrypt)"
-}
-
-log_final_state() {
-    [ "$FINAL_STATE_LOGGED" = "1" ] && return 0
-    FINAL_STATE_LOGGED=1
-    dump_goodix_state "final_state"
+    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) weaver_ready=$(getprop twrp.nezha.weaver_ready) gate_error=$(getprop twrp.nezha.goodix_gate_error)"
 }
 
 wait_stable_running() {
     name="$1"
+    limit="$3"
+    case "$limit" in
+        ""|*[!0-9]*) limit=15 ;;
+    esac
+    [ "$limit" -le 15 ] || limit=15
     i=0
-    state=""
-    while [ "$i" -lt 15 ]; do
+    while [ "$i" -lt "$limit" ]; do
         state="$(getprop "init.svc.$name")"
         log_msg "wait_stable_running $name second=$i state=$state"
-        if [ "$state" = "running" ]; then
-            log_msg "$name ready state=running"
-            return 0
-        fi
+        [ "$state" = "running" ] && return 0
+        [ -z "$state" ] && return 1
+        [ "$state" = "failed" ] && return 1
+        [ "$state" = "stopped" ] && return 1
         sleep 1
         i=$((i + 1))
     done
-    log_msg "$name timeout final state=$state"
+    log_msg "wait_stable_running $name timeout=${limit}s state=$(getprop "init.svc.$name")"
     return 1
 }
+
+trap 'dump_goodix_state "final_state"' EXIT
 
 wait_socket() {
     path="$1"
@@ -196,17 +196,25 @@ ensure_st54se_path() {
 }
 
 log_gsea_sysfs_view() {
-    log_msg "$1: cos_update_state=$([ -e "$GSEA_COS_STATE" ] && echo visible || echo missing) strongbox_io_state=$([ -e "$GSEA_STRONGBOX_STATE" ] && echo visible || echo missing)"
+    log_msg "$1: cos_update_state=$([ -e "$GSEA_COS_STATE" ] && cat "$GSEA_COS_STATE" 2>/dev/null || echo missing) strongbox_io_state=$([ -e "$GSEA_STRONGBOX_STATE" ] && cat "$GSEA_STRONGBOX_STATE" 2>/dev/null || echo missing)"
 }
 
 log_gsea_sysfs_missing_diag() {
     {
+        echo "nezha-goodix-gate: $1: /proc/modules FBE view"
+        cat /proc/modules 2>/dev/null | grep -E "gsim|spi_msm|spi-msm|stm|smcinvoke|qsee" || true
         echo "nezha-goodix-gate: $1: /sys/se view"
         ls -ld /sys/se /sys/se/* 2>/dev/null || true
+        echo "nezha-goodix-gate: $1: dmesg FBE view"
+        dmesg 2>/dev/null | grep -Ei "gsim|st54|st21|secure hw|Peripheral not found|smcinvoke|qsee" | tail -120 || true
     } >> "$LOG"
     {
+        echo "nezha-goodix-gate: $1: /proc/modules FBE view"
+        cat /proc/modules 2>/dev/null | grep -E "gsim|spi_msm|spi-msm|stm|smcinvoke|qsee" || true
         echo "nezha-goodix-gate: $1: /sys/se view"
         ls -ld /sys/se /sys/se/* 2>/dev/null || true
+        echo "nezha-goodix-gate: $1: dmesg FBE view"
+        dmesg 2>/dev/null | grep -Ei "gsim|st54|st21|secure hw|Peripheral not found|smcinvoke|qsee" | tail -120 || true
     } >> "$TMPLOG" 2>/dev/null || true
 }
 
@@ -238,75 +246,11 @@ goodix_errors_since() {
         "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|GetSlots Failed|Weaver AIDL getConfig Status\\(-8\\)"
 }
 
-log_goodix_errors_since() {
-    start_line="$1"
-    [ -z "$start_line" ] && start_line=1
-    errors="$(sed -n "${start_line},\$p" "$LOG" 2>/dev/null | grep -Ei \
-        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|GetSlots Failed|Weaver AIDL getConfig Status\\(-8\\)" | tail -5)"
-    [ -n "$errors" ] && log_msg "eSE transport blocker separate from binder CLI check: $(echo "$errors" | tr '\n' ';')"
-}
-
-weaver_ready_log_seen_since() {
-    start_line="$1"
-    [ -z "$start_line" ] && start_line=1
-    scan="$TMPROOT/weaver-ready-log-scan"
-
-    tail -n +"$start_line" "$LOG" > "$scan" 2>/dev/null || : > "$scan"
-    if grep -q "Weaver Service is ready" "$scan" 2>/dev/null; then
-        return 0
-    fi
-    if [ -f /tmp/logcat.log ] && tail -200 /tmp/logcat.log > "$scan" 2>/dev/null && grep -q "Weaver Service is ready" "$scan" 2>/dev/null; then
-        return 0
-    fi
-    if command -v logcat >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-        timeout 2 logcat -d > "$scan" 2>/dev/null || : > "$scan"
-        grep -q "Weaver Service is ready" "$scan" 2>/dev/null && return 0
-    fi
-    return 1
-}
-
-log_weaver_running_optional_diag() {
-    start_line="$1"
-
-    if [ ! -x /system/bin/service ]; then
-        log_msg "binder service cli missing; keeping goodix_weaver_hal_service running for AIDL test"
-    fi
-    if weaver_ready_log_seen_since "$start_line"; then
-        log_msg "Weaver Service is ready observed without binder service cli"
-    else
-        log_msg "Weaver Service is ready not observed; keeping running init state for AIDL test"
-    fi
-}
-
-weaver_running_accept_aidl_test() {
-    start_line="$1"
-
-    setprop twrp.nezha.weaver_ready 1
-    log_msg "goodix_weaver_hal_service running; marking weaver_ready for AIDL test"
-    log_final_state
-    log_goodix_errors_since "$start_line"
-    log_weaver_running_optional_diag "$start_line"
-    if [ "$(getprop init.svc.goodix_weaver_hal_service)" != "running" ]; then
-        log_msg "goodix_weaver_hal_service changed state after ready mark state=$(getprop init.svc.goodix_weaver_hal_service)"
-    fi
-    exit 0
-}
-
 weaver_binder_registered() {
-    start_line="$1"
-
     if [ ! -x /system/bin/service ]; then
-        log_msg "binder service cli missing; keeping goodix_weaver_hal_service running for AIDL test"
-        if [ "$(getprop init.svc.goodix_weaver_hal_service)" != "running" ]; then
-            log_msg "goodix_weaver_hal_service not running while binder service cli is missing"
-            return 1
-        fi
-        if weaver_ready_log_seen_since "$start_line"; then
-            log_msg "Weaver Service is ready observed without binder service cli"
-        else
-            log_msg "Weaver Service is ready not observed; keeping running init state for AIDL test"
-        fi
-        return 0
+        log_msg "cannot verify $WEAVER_AIDL_SERVICE: /system/bin/service missing"
+        setprop twrp.nezha.goodix_gate_error service_check_missing
+        return 1
     fi
 
     /system/bin/service check "$WEAVER_AIDL_SERVICE" > "$TMPROOT/weaver-service-check" 2>&1 || true
@@ -328,12 +272,11 @@ validate_weaver_ready() {
         log_msg "secure_element_hal_service is not stable after Weaver start"
         return 1
     fi
-    if ! weaver_binder_registered "$start_line"; then
+    if ! weaver_binder_registered; then
         return 1
     fi
     if goodix_errors_since "$start_line"; then
         setprop twrp.nezha.goodix_gate_error goodix_transport_error_after_weaver
-        log_goodix_errors_since "$start_line"
         log_msg "Goodix/eSE transport errors appeared after Weaver start; not marking ready"
         return 1
     fi
@@ -527,8 +470,6 @@ ensure_secure_element_firmware() {
 setprop twrp.nezha.goodix_gate_started 1
 setprop twrp.nezha.goodix_gate_error ""
 setprop twrp.nezha.weaver_ready 0
-FINAL_STATE_LOGGED=0
-trap 'log_final_state' EXIT
 prepare_tmp_state
 detect_route
 log_msg "start"
@@ -676,28 +617,42 @@ if ! wait_stable_running recovery.qwesd "$qwes_stable" "$qwes_limit"; then
 fi
 log_msg "recovery.qwesd ready state=$(getprop init.svc.recovery.qwesd)"
 
-ensure_secure_element_firmware before_vendor_secure_element
-fw_rc=$?
-log_msg "after before_vendor_secure_element rc=$fw_rc state_vendor_secure=$(getprop init.svc.vendor.secure_element)"
-if [ "$fw_rc" != "0" ]; then
+if ! ensure_secure_element_firmware before_vendor_secure_element; then
     log_msg "secure-element firmware disappeared before vendor.secure_element"
     exit 0
 fi
 start vendor.secure_element
-log_msg "before start secure_element_hal_service"
+if ! wait_stable_running vendor.secure_element "$qti_se_stable" "$qti_se_limit"; then
+    setprop twrp.nezha.goodix_gate_error vendor_secure_element_not_stable
+    log_msg "vendor.secure_element did not stay running"
+    exit 0
+fi
+
+sleep "$settle_before_goodix"
+
+if ! ensure_secure_element_firmware before_secure_element_hal_service; then
+    log_msg "secure-element firmware disappeared before secure_element_hal_service"
+    exit 0
+fi
+if ! ensure_st54se_path before_secure_element_hal_service; then
+    log_msg "ST54SE NFC/eSE path disappeared before secure_element_hal_service"
+    exit 0
+fi
+if ! ensure_gsea_sysfs before_secure_element_hal_service; then
+    log_msg "GSEA sysfs state disappeared before secure_element_hal_service"
+    dump_goodix_state "final_state"
+    exit 0
+fi
 log_msg "start secure_element_hal_service"
 start secure_element_hal_service
 log_msg "wait_stable_running secure_element_hal_service"
-wait_stable_running secure_element_hal_service
-se_rc=$?
-log_msg "after secure_element_hal_service wait rc=$se_rc state=$(getprop init.svc.secure_element_hal_service)"
-if [ "$se_rc" != "0" ]; then
+if ! wait_stable_running secure_element_hal_service "$se_stable" "$se_limit"; then
     setprop twrp.nezha.goodix_gate_error secure_element_hal_not_stable
     log_msg "secure_element_hal_service failed state=$(getprop init.svc.secure_element_hal_service)"
-    log_final_state
-    exit 0
+    dump_goodix_state "final_state"
+else
+    log_msg "secure_element_hal_service ready state=$(getprop init.svc.secure_element_hal_service)"
 fi
-log_msg "secure_element_hal_service ready state=$(getprop init.svc.secure_element_hal_service)"
 
 attempt=1
 while [ "$attempt" -le "$weaver_attempts" ]; do
@@ -710,20 +665,22 @@ while [ "$attempt" -le "$weaver_attempts" ]; do
     fi
     if ! ensure_gsea_sysfs "before_goodix_weaver_hal_service_attempt_$attempt"; then
         log_msg "GSEA sysfs state disappeared before goodix_weaver_hal_service"
-        log_final_state
+        dump_goodix_state "final_state"
         exit 0
     fi
     start goodix_weaver_hal_service
     log_msg "wait_stable_running goodix_weaver_hal_service"
-    wait_stable_running goodix_weaver_hal_service
-    gw_rc=$?
-    gw_state="$(getprop init.svc.goodix_weaver_hal_service)"
-    log_msg "after goodix_weaver_hal_service wait rc=$gw_rc state=$gw_state"
-    if [ "$gw_rc" = "0" ] || [ "$gw_state" = "running" ]; then
-        log_msg "goodix_weaver_hal_service ready state=$gw_state"
-        weaver_running_accept_aidl_test "$ATTEMPT_LOG_START"
+    if wait_stable_running goodix_weaver_hal_service "$weaver_stable" "$weaver_limit"; then
+        log_msg "goodix_weaver_hal_service ready state=$(getprop init.svc.goodix_weaver_hal_service)"
+        sleep 2
+        if validate_weaver_ready "$ATTEMPT_LOG_START"; then
+            setprop twrp.nezha.weaver_ready 1
+            log_msg "Goodix eSE2 transport and Weaver service registered route=$(getprop twrp.nezha.crypto_route)"
+            dump_goodix_state "final_state"
+            exit 0
+        fi
     else
-        log_msg "goodix_weaver_hal_service failed state=$gw_state"
+        log_msg "goodix_weaver_hal_service failed state=$(getprop init.svc.goodix_weaver_hal_service)"
     fi
     stop goodix_weaver_hal_service
     killall android.hardware.weaver-service-goodix-recovery 2>/dev/null || true
@@ -736,5 +693,5 @@ if [ "$(getprop init.svc.goodix_weaver_hal_service)" != "running" ]; then
     log_msg "goodix_weaver_hal_service failed state=$(getprop init.svc.goodix_weaver_hal_service)"
 fi
 
-log_final_state
+dump_goodix_state "final_state"
 exit 0
