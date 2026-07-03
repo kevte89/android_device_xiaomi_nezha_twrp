@@ -11,3 +11,4 @@ service minkipcbinder-service /vendor/bin/hw/vendor.qti.hardware.minkipcbinder@1
    interface aidl vendor.qti.hardware.minkipcbinder.IMinkServer/default
    disabled
    oneshot
+   seclabel u:r:recovery:s0

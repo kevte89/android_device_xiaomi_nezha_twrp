@@ -54,6 +54,7 @@ on fs
     mkdir /vendor/firmware_mnt 0755 root root
     mkdir /vendor/modem_firmware_mnt 0755 root root
     mkdir /firmware 0755 root root
+    mkdir /tmp/secure_element_fwroot 0755 root root
 
     # Primary KeyMint is the QTI vendor service. Credential unlock uses
     # nezha's stock Goodix eSE/Weaver chain started after servicemanager.
@@ -86,14 +87,23 @@ on property:twrp.modules.loaded=true
     # Goodix TA files needed by Mink and makes FBE unlock intermittent.
     mkdir /vendor/firmware_mnt 0755 root root
     mkdir /vendor/modem_firmware_mnt 0755 root root
+    exec u:r:recovery:s0 root root -- /system/bin/secure-element-ta-setup.sh
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /vendor/modem_firmware_mnt ro
     mount none /vendor/modem_firmware_mnt /firmware bind
-    mount none /sbin/nezha-firmware /vendor/firmware_mnt bind
+    mount none /tmp/secure_element_fwroot /vendor/firmware_mnt bind
+    exec u:r:recovery:s0 root root -- /system/bin/secure-element-followup.sh
     chmod 0755 /sbin/iw
     chmod 0755 /sbin/wifi-dhcp.sh
     chmod 0755 /sbin/wifi-load-modules.sh
     chmod 0755 /sbin/wpa_cli
     chmod 0755 /sbin/wpa_supplicant
+
+    # init.gsea0.se.rc runs at late-init before recovery loads vendor modules.
+    # Reapply the stock sysfs permissions once stm_st54se_gpio has created /sys/se.
+    wait /sys/se/cos_update_state 5
+    wait /sys/se/strongbox_io_state 5
+    chmod 0666 /sys/se/cos_update_state
+    chmod 0666 /sys/se/strongbox_io_state
 
     # Load ADSP for PMIC
     wait /sys/kernel/boot_adsp/boot
@@ -165,6 +175,17 @@ service nezha-goodix-gate /system/bin/nezha-goodix-gate.sh
     oneshot
     user root
     group root shell
+    seclabel u:r:recovery:s0
+
+# Stock vendor/etc/init/hw/init.qcom.rc starts ssgqmigd through init so the
+# daemon receives ANDROID_SOCKET_ssgqmig. Starting the binary directly breaks
+# sec_channel setup.
+service ssgqmigd /vendor/bin/ssgqmigd
+    class late_start
+    user radio
+    group radio gps system
+    socket ssgqmig seqpacket 0660 radio inet
+    disabled
     seclabel u:r:recovery:s0
 
 # Stop recovery-local Goodix services before any reboot target.

@@ -14,6 +14,12 @@ ro.product.manufacturer=Xiaomi
 ro.board.platform=canoe
 ro.hardware=qcom
 
+# Goodix/ST54L secure element transport
+ro.special_edition=true
+ro.vendor.se.chip.model=ST54L
+ro.vendor.nfc.disable.i2c=false
+nfc.fw.is_downloading=false
+
 # CPU ABI
 ro.product.cpu.abilist=arm64-v8a
 ro.product.cpu.abi=arm64-v8a

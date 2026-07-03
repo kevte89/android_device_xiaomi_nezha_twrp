@@ -2,4 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 /odm/bin/hw/vendor\.xiaomi\.hardware\.vibratorfeature\.service    u:object_r:hal_vibrator_default_exec:s0
+/vendor/bin/hlosminkdaemon                                      u:object_r:vendor_file:s0
+/vendor/bin/qwesd                                               u:object_r:vendor_file:s0
+/vendor/bin/hw/vendor\.qti\.hardware\.minkipcbinder@1\.0-service u:object_r:vendor_hal_minkipcbinder_default_exec:s0
+/system/bin/secure-element-ta-setup\.sh                         u:object_r:system_file:s0
+/system/bin/secure-element-followup\.sh                         u:object_r:system_file:s0
+/dev/smcinvoke                                                  u:object_r:smcinvoke_device:s0
+/dev/qsee_ipc_irq_spss                                          u:object_r:qsee_ipc_irq_spss_device:s0
+/dev/ufs-bsg0                                                   u:object_r:qseecom_ufs_bsg_device:s0
+/dev/dma_heap/qcom,qseecom                                      u:object_r:qseecom_dma_heap_device:s0
+/dev/0:0:0:[0-9]+                                               u:object_r:qseecom_dynamic_device:s0
 /data/vendor/goodix(/.*)?                                           u:object_r:vendor_fingerprint_data_file:s0
+/persist/data(/.*)?                                             u:object_r:qseecom_persist_data_file:s0
+/mnt/vendor/persist/data(/.*)?                                  u:object_r:qseecom_persist_data_file:s0

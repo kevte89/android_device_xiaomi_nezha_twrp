@@ -74,3 +74,16 @@ If the active slot is `b`:
 This tree is not final yet.
 
 The current priority is a stable booting recovery base. Encryption and internal storage support are being worked on carefully without breaking the working recovery boot.
+
+## Current development note
+
+Current stable test state:
+
+- TWRP boots reliably into the UI.
+- Touch, ADB and basic recovery usage work.
+- No-display-lock boot hang is fixed.
+- FBE/User 0 decryption is still not complete.
+- Goodix/eSE/GSEA/Weaver bringup is still under investigation.
+- Bootable recovery changes are stored as patches under `patches/bootable-recovery/`.
+
+This repository is still under active development.
