@@ -38,12 +38,13 @@ log_msg() {
 }
 
 dump_goodix_state() {
-    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.qwesd=$(getprop init.svc.vendor.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) ssgqmigd=$(getprop init.svc.ssgqmigd) minkipcbinder-service=$(getprop init.svc.minkipcbinder-service) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) twrp.nezha.weaver_ready=$(getprop twrp.nezha.weaver_ready) twrp.nezha.goodix_gate_error=$(getprop twrp.nezha.goodix_gate_error) twrp.user.0.decrypt=$(getprop twrp.user.0.decrypt)"
+    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.qwesd=$(getprop init.svc.vendor.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) ssgqmigd=$(getprop init.svc.ssgqmigd) minkipcbinder-service=$(getprop init.svc.minkipcbinder-service) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) twrp.nezha.weaver_service_running=$(getprop twrp.nezha.weaver_service_running) twrp.nezha.weaver_transport_ready=$(getprop twrp.nezha.weaver_transport_ready) twrp.nezha.weaver_ready=$(getprop twrp.nezha.weaver_ready) twrp.nezha.goodix_gate_finished=$(getprop twrp.nezha.goodix_gate_finished) twrp.nezha.goodix_gate_error=$(getprop twrp.nezha.goodix_gate_error) twrp.user.0.decrypt=$(getprop twrp.user.0.decrypt)"
 }
 
 log_final_state() {
     [ "$FINAL_STATE_LOGGED" = "1" ] && return 0
     FINAL_STATE_LOGGED=1
+    setprop twrp.nezha.goodix_gate_finished 1
     dump_goodix_state "final_state"
 }
 
@@ -235,14 +236,14 @@ goodix_errors_since() {
     start_line="$1"
     [ -z "$start_line" ] && start_line=1
     sed -n "${start_line},\$p" "$LOG" 2>/dev/null | grep -Eqi \
-        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|GetSlots Failed|Weaver AIDL getConfig Status\\(-8\\)"
+        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|atr_len = 0|SSGQMSCA|SSGSCA|completed max retries exit failure|GetSlots Failed|Failed Parsing getSlot Response|Weaver AIDL getConfig Status\\(-8\\)"
 }
 
 log_goodix_errors_since() {
     start_line="$1"
     [ -z "$start_line" ] && start_line=1
     errors="$(sed -n "${start_line},\$p" "$LOG" 2>/dev/null | grep -Ei \
-        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|GetSlots Failed|Weaver AIDL getConfig Status\\(-8\\)" | tail -5)"
+        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|atr_len = 0|SSGQMSCA|SSGSCA|completed max retries exit failure|GetSlots Failed|Failed Parsing getSlot Response|Weaver AIDL getConfig Status\\(-8\\)" | tail -5)"
     [ -n "$errors" ] && log_msg "eSE transport blocker separate from binder CLI check: $(echo "$errors" | tr '\n' ';')"
 }
 
@@ -281,14 +282,19 @@ log_weaver_running_optional_diag() {
 weaver_running_accept_aidl_test() {
     start_line="$1"
 
-    setprop twrp.nezha.weaver_ready 1
-    log_msg "goodix_weaver_hal_service running; marking weaver_ready for AIDL test"
-    log_final_state
-    log_goodix_errors_since "$start_line"
+    setprop twrp.nezha.weaver_service_running 1
+    setprop twrp.nezha.weaver_transport_ready 0
+    setprop twrp.nezha.weaver_ready 0
+    if goodix_errors_since "$start_line"; then
+        setprop twrp.nezha.goodix_gate_error ese_transport_failed
+        log_goodix_errors_since "$start_line"
+    fi
+    log_msg "goodix_weaver_hal_service running; service is up but Weaver transport not validated"
     log_weaver_running_optional_diag "$start_line"
     if [ "$(getprop init.svc.goodix_weaver_hal_service)" != "running" ]; then
         log_msg "goodix_weaver_hal_service changed state after ready mark state=$(getprop init.svc.goodix_weaver_hal_service)"
     fi
+    log_final_state
     exit 0
 }
 
@@ -525,7 +531,10 @@ ensure_secure_element_firmware() {
 }
 
 setprop twrp.nezha.goodix_gate_started 1
+setprop twrp.nezha.goodix_gate_finished 0
 setprop twrp.nezha.goodix_gate_error ""
+setprop twrp.nezha.weaver_service_running 0
+setprop twrp.nezha.weaver_transport_ready 0
 setprop twrp.nezha.weaver_ready 0
 FINAL_STATE_LOGGED=0
 trap 'log_final_state' EXIT
@@ -703,28 +712,30 @@ attempt=1
 while [ "$attempt" -le "$weaver_attempts" ]; do
     setprop twrp.nezha.goodix_gate_attempt "$attempt"
     log_msg "start goodix_weaver_hal_service attempt $attempt"
-    ATTEMPT_LOG_START="$(log_line_count)"
-    if ! ensure_secure_element_firmware "before_goodix_weaver_hal_service_attempt_$attempt"; then
+    ensure_secure_element_firmware "before_goodix_weaver_hal_service_attempt_$attempt"
+    fw_rc=$?
+    log_msg "after before_goodix_weaver_hal_service_attempt_$attempt rc=$fw_rc state=$(getprop init.svc.goodix_weaver_hal_service)"
+    if [ "$fw_rc" != "0" ]; then
         log_msg "secure-element firmware disappeared before goodix_weaver_hal_service"
-        exit 0
-    fi
-    if ! ensure_gsea_sysfs "before_goodix_weaver_hal_service_attempt_$attempt"; then
-        log_msg "GSEA sysfs state disappeared before goodix_weaver_hal_service"
         log_final_state
         exit 0
     fi
+    log_msg "start command goodix_weaver_hal_service attempt $attempt"
     start goodix_weaver_hal_service
     log_msg "wait_stable_running goodix_weaver_hal_service"
     wait_stable_running goodix_weaver_hal_service
     gw_rc=$?
     gw_state="$(getprop init.svc.goodix_weaver_hal_service)"
     log_msg "after goodix_weaver_hal_service wait rc=$gw_rc state=$gw_state"
-    if [ "$gw_rc" = "0" ] || [ "$gw_state" = "running" ]; then
-        log_msg "goodix_weaver_hal_service ready state=$gw_state"
-        weaver_running_accept_aidl_test "$ATTEMPT_LOG_START"
-    else
-        log_msg "goodix_weaver_hal_service failed state=$gw_state"
+    if [ "$gw_state" = "running" ]; then
+        setprop twrp.nezha.weaver_service_running 1
+        setprop twrp.nezha.weaver_transport_ready 0
+        setprop twrp.nezha.weaver_ready 0
+        log_msg "goodix_weaver_hal_service running; service is up but transport is not validated"
+        log_final_state
+        exit 0
     fi
+    log_msg "goodix_weaver_hal_service failed state=$gw_state"
     stop goodix_weaver_hal_service
     killall android.hardware.weaver-service-goodix-recovery 2>/dev/null || true
     sleep "$retry_sleep"

@@ -1,0 +1,223 @@
+diff --git a/Decrypt.cpp b/Decrypt.cpp
+index a02bad8..9677a68 100755
+--- a/Decrypt.cpp
++++ b/Decrypt.cpp
+@@ -313,6 +313,33 @@ bool Get_Spblob_Data(const std::string& spblob_path, const std::string& handle_s
+ 	return found_file;
+ }
+ 
++bool Has_Spblob_State_File(const std::string& spblob_path, const std::string& handle_str, const std::string& suffix) {
++	struct stat st;
++	std::vector<std::string> file_paths = {
++		spblob_path + handle_str + suffix,
++		spblob_path + "0" + handle_str + suffix,
++		spblob_path + "00" + handle_str + suffix
++	};
++	for (auto& file : file_paths) {
++		if (stat(file.c_str(), &st) == 0)
++			return true;
++	}
++	return false;
++}
++
++bool Password_Data_Is_Optional(const std::string& spblob_path, const std::string& handle_str) {
++	if (Has_Spblob_State_File(spblob_path, handle_str, ".pwd"))
++		return false;
++	return Has_Spblob_State_File(spblob_path, handle_str, ".spblob")
++		&& Has_Spblob_State_File(spblob_path, handle_str, ".weaver");
++}
++
++void Get_Default_Stretched_Lskf(unsigned char* password_token) {
++	memset(password_token, 0, 32);
++	std::string defpassword = "default-password";
++	memcpy(password_token, defpassword.data(), defpassword.length());
++}
++
+ /* C++ replacement for
+  * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#764 */
+ bool Get_Password_Data(const std::string& spblob_path, const std::string& handle_str, password_data_struct *pwd) {
+@@ -742,8 +769,13 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+ 	unsigned char password_token[PASSWORD_TOKEN_SIZE];
+ 	if (Password != "!") {
+ 		if (!Get_Password_Data(spblob_path, handle_str, &pwd)) {
+-			printf("Failed to Get_Password_Data\n");
+-			return Free_Return(retval, weaver_key, &pwd);
++			if (!Password_Data_Is_Optional(spblob_path, handle_str)) {
++				printf("Failed to Get_Password_Data\n");
++				return Free_Return(retval, weaver_key, &pwd);
++			}
++			printf("No password data for Weaver synthetic password protector; using Android 16 none credential path\n");
++			Get_Default_Stretched_Lskf(&password_token[0]);
++			goto password_token_ready;
+ 		}
+ 		printf("fscrypt::GetPassword_Token\n");
+ 		if (!Get_Password_Token(&pwd, Password, &password_token[0])) {
+@@ -752,9 +784,9 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+ 		}
+ 	} else {
+ 		android::keystore::copySqliteDb(); // early copy db for keystore
+-		std::string defpassword = "default-password";
+-		memcpy(password_token, defpassword.data(), defpassword.length());
++		Get_Default_Stretched_Lskf(&password_token[0]);
+ 	}
++password_token_ready:
+ 	// output_hex(&password_token[0], PASSWORD_TOKEN_SIZE);printf("\n");
+ 	if (Is_Weaver(spblob_path, handle_str)) {
+ 		printf("using weaver\n");
+@@ -971,11 +1003,15 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+ 		KeystoreInfo keystore_info;
+ 		std::string handle_str = keystore_info.getHandle(user_id);
+ 		printf("Handle is '%s'\n", handle_str.c_str());
+-		password_data_struct pwd;
+-		if (!Get_Password_Data(spblob_path, handle_str, &pwd)) {
+-			printf("Failed to Get_Password_Data\n");
+-			return 0;
+-		}
++			password_data_struct pwd;
++			if (!Get_Password_Data(spblob_path, handle_str, &pwd)) {
++				if (Password_Data_Is_Optional(spblob_path, handle_str)) {
++					printf("No password data for Weaver synthetic password protector; password type is none\n");
++					return 0;
++				}
++				printf("Failed to Get_Password_Data\n");
++				return 0;
++			}
+ 		// In Android type 1 is pattern
+ 		// In Android <11 type 2 is PIN or password
+ 		// In Android 11+ type 3 is PIN and type 4 is password
+@@ -1012,11 +1048,23 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+ 	if (stat(filename.c_str(), &st) == 0 && st.st_size > 0)
+ 		return 2;
+ 	printf("Unable to locate gatekeeper password file '%s'\n", filename.c_str());
+-	filename = "";
+-	return 0;
+-}
++		filename = "";
++		return 0;
++	}
+ 
+-extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
++	extern "C" bool Is_Password_Data_Optional(const userid_t user_id) {
++		struct stat st;
++		char spblob_path_char[PATH_MAX];
++		sprintf(spblob_path_char, "/data/system_de/%d/spblob/", user_id);
++		if (stat(spblob_path_char, &st) != 0)
++			return false;
++		std::string spblob_path = spblob_path_char;
++		KeystoreInfo keystore_info;
++		std::string handle_str = keystore_info.getHandle(user_id);
++		return Password_Data_Is_Optional(spblob_path, handle_str);
++	}
++
++	extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
+ 	printf("Attempting to decrypt user\n");
+     uint8_t *auth_token;
+     uint32_t auth_token_len;
+@@ -1029,10 +1077,11 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+ 	}
+     std::string filename;
+     bool Default_Password = (Password == "!");
+-    if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
+-		printf("Unknown password type\n");
+-		return false;
+-	}
++	    if (Get_Password_Type(user_id, filename) == 0 && !Default_Password
++				&& !Is_Password_Data_Optional(user_id)) {
++			printf("Unknown password type\n");
++			return false;
++		}
+ 
+ 	if (Default_Password) {
+ 		if (!Decrypt_CE_storage(user_id, "!")) {
+diff --git a/Decrypt.h b/Decrypt.h
+index ff926dc..b082940 100755
+--- a/Decrypt.h
++++ b/Decrypt.h
+@@ -34,10 +34,11 @@ static constexpr int NAMESPACE_LOCKSETTINGS = 103;
+ 
+ namespace android {
+ namespace keystore {
+-    void copySqliteDb();
+-    int Get_Password_Type(const userid_t user_id, std::string& filename);
+-    bool Decrypt_DE();
+-    bool Decrypt_User(const userid_t user_id, const std::string& Password);
++	    void copySqliteDb();
++	    int Get_Password_Type(const userid_t user_id, std::string& filename);
++	    bool Is_Password_Data_Optional(const userid_t user_id);
++	    bool Decrypt_DE();
++	    bool Decrypt_User(const userid_t user_id, const std::string& Password);
+ }
+ }
+ __END_DECLS
+diff --git a/Weaver1.cpp b/Weaver1.cpp
+index a2eeaaa..faee6b1 100644
+--- a/Weaver1.cpp
++++ b/Weaver1.cpp
+@@ -29,11 +29,14 @@
+ //#include <keystore/keystore_hidl_support.h>
+ 
+ #include <android/binder_manager.h>
++#include <cutils/properties.h>
+ 
+ #include <android/hardware/weaver/1.0/IWeaver.h>
+ #include <aidl/android/hardware/weaver/IWeaver.h>
+ 
++#include <cstring>
+ #include <iostream>
++#include <unistd.h>
+ #define ERROR 1
+ #define LOG(x) std::cout
+ 
+@@ -50,6 +53,12 @@ using ::android::sp;
+ namespace android {
+ namespace vold {
+ 
++static bool NezhaNormal590() {
++	char route[PROPERTY_VALUE_MAX];
++	property_get("twrp.nezha.crypto_route", route, "");
++	return strcmp(route, "normal_590") == 0;
++}
++
+ Weaver::Weaver() {
+     const std::string instance = std::string(::aidl::android::hardware::weaver::IWeaver::descriptor) + "/default";
+     AIBinder* binder = AServiceManager_waitForService(instance.c_str());
+@@ -65,10 +74,35 @@ bool Weaver::GetConfig() {
+ 		return true;
+ 
+ 	if (mAidlDevice != nullptr) {
+-		auto r = mAidlDevice->getConfig(&aidlConfig);
+-		if (r.isOk()) {
+-			GottenConfig = true;
+-			return true;
++		const int maxAttempts = NezhaNormal590() ? 2 : 80;
++		for (int attempt = 0; attempt < maxAttempts; attempt++) {
++			auto r = mAidlDevice->getConfig(&aidlConfig);
++			if (r.isOk() && aidlConfig.keySize > 0 && aidlConfig.valueSize > 0) {
++				LOG(ERROR) << "Weaver AIDL getConfig OK on attempt " << (attempt + 1)
++					   << " slots=" << aidlConfig.slots
++					   << " keySize=" << aidlConfig.keySize
++					   << " valueSize=" << aidlConfig.valueSize << "\n";
++				GottenConfig = true;
++				return true;
++			}
++			if (attempt == 0 || attempt == 19 || attempt == 39 || attempt == 79 || attempt == maxAttempts - 1) {
++				LOG(ERROR) << "Weaver AIDL getConfig not ready on attempt " << (attempt + 1)
++					   << " status=" << r.getDescription()
++					   << " keySize=" << aidlConfig.keySize
++					   << " valueSize=" << aidlConfig.valueSize << "\n";
++			}
++			if (NezhaNormal590() && !r.isOk() && r.getServiceSpecificError() != 0) {
++				LOG(ERROR) << "I:nezha: Weaver AIDL getConfig failed; Goodix transport not usable\n";
++				property_set("twrp.nezha.weaver_transport_ready", "0");
++				property_set("twrp.nezha.weaver_ready", "0");
++				return false;
++			}
++			usleep(250000);
++		}
++		if (NezhaNormal590()) {
++			LOG(ERROR) << "I:nezha: Weaver AIDL getConfig failed; Goodix transport not usable\n";
++			property_set("twrp.nezha.weaver_transport_ready", "0");
++			property_set("twrp.nezha.weaver_ready", "0");
+ 		}
+ 		return false;
+ 	}

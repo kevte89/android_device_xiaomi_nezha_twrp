@@ -9,7 +9,7 @@ log_msg() {
 }
 
 log_status() {
-    log_msg "qsee=$(getprop init.svc.vendor.qseecomd) mink=$(getprop init.svc.vendor.minkdaemon) se=$(getprop init.svc.secure_element_hal_service) weaver=$(getprop init.svc.goodix_weaver_hal_service) ready=$(getprop twrp.nezha.weaver_ready)"
+    log_msg "qsee=$(getprop init.svc.vendor.qseecomd) mink=$(getprop init.svc.vendor.minkdaemon) se=$(getprop init.svc.secure_element_hal_service) weaver=$(getprop init.svc.goodix_weaver_hal_service) service_running=$(getprop twrp.nezha.weaver_service_running) transport_ready=$(getprop twrp.nezha.weaver_transport_ready) ready=$(getprop twrp.nezha.weaver_ready)"
 }
 
 repair_goodix_data() {
@@ -33,6 +33,8 @@ repair_goodix_data() {
 log_msg "start"
 log_status
 setprop twrp.nezha.weaver_ready 0
+setprop twrp.nezha.weaver_service_running 0
+setprop twrp.nezha.weaver_transport_ready 0
 repair_goodix_data
 
 stop goodix_weaver_hal_service

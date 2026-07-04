@@ -29,6 +29,8 @@ repair_goodix_data() {
 
 log_msg "start"
 setprop twrp.nezha.weaver_ready 0
+setprop twrp.nezha.weaver_service_running 0
+setprop twrp.nezha.weaver_transport_ready 0
 setprop twrp.nezha.goodix_cleanup_started 1
 
 repair_goodix_data

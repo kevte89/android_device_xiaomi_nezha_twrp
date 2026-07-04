@@ -38,7 +38,7 @@ log_msg() {
 }
 
 dump_goodix_state() {
-    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) weaver_ready=$(getprop twrp.nezha.weaver_ready) gate_error=$(getprop twrp.nezha.goodix_gate_error)"
+    log_msg "$1: recovery.qwesd=$(getprop init.svc.recovery.qwesd) vendor.minkdaemon=$(getprop init.svc.vendor.minkdaemon) vendor.secure_element=$(getprop init.svc.vendor.secure_element) secure_element_hal_service=$(getprop init.svc.secure_element_hal_service) goodix_weaver_hal_service=$(getprop init.svc.goodix_weaver_hal_service) weaver_service_running=$(getprop twrp.nezha.weaver_service_running) weaver_transport_ready=$(getprop twrp.nezha.weaver_transport_ready) weaver_ready=$(getprop twrp.nezha.weaver_ready) gate_error=$(getprop twrp.nezha.goodix_gate_error)"
 }
 
 wait_stable_running() {
@@ -243,7 +243,7 @@ goodix_errors_since() {
     start_line="$1"
     [ -z "$start_line" ] && start_line=1
     sed -n "${start_line},\$p" "$LOG" 2>/dev/null | grep -Eqi \
-        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|GetSlots Failed|Weaver AIDL getConfig Status\\(-8\\)"
+        "HalToHalTransport: Not connected to eSE Service|Failed to open Logical Channel|No Goodix Chip found|T=1 protocol initialize failed|not receive 0x12|spi read failed|software reset failed|atr_len = 0|SSGQMSCA|SSGSCA|completed max retries exit failure|GetSlots Failed|Failed Parsing getSlot Response|Weaver AIDL getConfig Status\\(-8\\)"
 }
 
 weaver_binder_registered() {
@@ -469,6 +469,8 @@ ensure_secure_element_firmware() {
 
 setprop twrp.nezha.goodix_gate_started 1
 setprop twrp.nezha.goodix_gate_error ""
+setprop twrp.nezha.weaver_service_running 0
+setprop twrp.nezha.weaver_transport_ready 0
 setprop twrp.nezha.weaver_ready 0
 prepare_tmp_state
 detect_route
@@ -674,8 +676,10 @@ while [ "$attempt" -le "$weaver_attempts" ]; do
         log_msg "goodix_weaver_hal_service ready state=$(getprop init.svc.goodix_weaver_hal_service)"
         sleep 2
         if validate_weaver_ready "$ATTEMPT_LOG_START"; then
-            setprop twrp.nezha.weaver_ready 1
-            log_msg "Goodix eSE2 transport and Weaver service registered route=$(getprop twrp.nezha.crypto_route)"
+            setprop twrp.nezha.weaver_service_running 1
+            setprop twrp.nezha.weaver_transport_ready 0
+            setprop twrp.nezha.weaver_ready 0
+            log_msg "goodix_weaver_hal_service running; service is up but Weaver transport not validated"
             dump_goodix_state "final_state"
             exit 0
         fi
